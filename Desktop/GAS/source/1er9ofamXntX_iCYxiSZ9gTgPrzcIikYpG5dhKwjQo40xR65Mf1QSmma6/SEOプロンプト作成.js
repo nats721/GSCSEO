@@ -17,7 +17,15 @@ const BASE_SHEET_ID   = '1yPT0gT_Hc3tFW3yFhiOFq7O6LxJ9E1NGmmQEBWtVRvs';   // 読
 const OUTPUT_SHEET_ID = '1_URzGA15RYBOmLfjsifuuMIigAqR_YaPJvMbPgQosVw';   // 出力のみ
 const CACHE_SHEET_ID  = '1ZygntHC1J6IxzKbTidmOyf5nUyW4GCLurHCjexrLm_o';   // HTMLキャッシュのSS
 
-const TOP_N = 200;
+const DEFAULT_TOP_N = 200;
+const TOP_N_BY_RANGE = {
+  Weekly: 200,
+  Monthly: 200,
+  LongTerm: 200,
+  ZeroClick: 200,
+  Snippet: 200,
+  Manual: 200
+};
 const QUERY_TOP = 100;
 const EXCLUDE_RECENT_LASTMOD_DAYS = 0; // ← 好きなNに
 
@@ -223,6 +231,11 @@ function loadDomainsFromExistingSheet() {
 
 /*************************************************************/
 function shift(dt,days){ return new Date(dt.getTime()+days*DAY); }
+
+function getTopN_(rangeName){
+  const n = TOP_N_BY_RANGE[rangeName];
+  return (typeof n === "number" && n > 0) ? n : DEFAULT_TOP_N;
+}
 
 /*************************************************************
  * ★修正：fetchPagesMetrics
@@ -619,6 +632,7 @@ function isUnclassifiedCategory_(cat){
 
 /*************************************************************
  * レンジごとの抽出処理（差分・統合スコア版）
+ * - 対象レンジ: Weekly / Monthly / LongTerm（この関数で共通処理）
  * ★修正：
  * - 未分類は除外（推定しない）
  * - レンジ横断の重複排除（picked）
@@ -672,7 +686,7 @@ function extractRangeWithScore_(ssOut, domains, range, sheetName, rangeName, las
       if (!hasValidLastmod_(lastmod)) return;
 
       // ★ lastmodが新しすぎるページは除外
-      if (isLastmodTooRecent_(lastmod, EXCLUDE_RECENT_LASTMOD_DAYS)) return;
+      if (shouldExcludeByLastmod_(lastmod)) return;
 
       if (rangeName === "Weekly") {
         if (Math.abs(ctrDiff) < 0.005) return;
@@ -723,7 +737,7 @@ function extractRangeWithScore_(ssOut, domains, range, sheetName, rangeName, las
     table.sort((a,b) => b.score - a.score);
   }
 
-  const top = table.slice(0, TOP_N);
+  const top = table.slice(0, getTopN_(rangeName));
 
   // ★採用URLを登録（レンジ横断で重複排除）
   if (picked){
@@ -803,7 +817,7 @@ function extractRangeZeroClick_(ssOut, domains, range, sheetName, rangeName,
       if (!hasValidLastmod_(lastmod)) return;
 
       // ★ ZeroClick でも lastmod が新しすぎるページは除外
-      if (isLastmodTooRecent_(lastmod, EXCLUDE_RECENT_LASTMOD_DAYS)) return;
+      if (shouldExcludeByLastmod_(lastmod)) return;
 
       // ★スコア：IMPを主軸 + 上位順位ほど少し優先（「見えてるのに押されない」を先に）
       let score = a.impressions;
@@ -833,7 +847,7 @@ function extractRangeZeroClick_(ssOut, domains, range, sheetName, rangeName,
     table.sort((a,b) => b.score - a.score);
   }
 
-  const top = table.slice(0, TOP_N);
+  const top = table.slice(0, getTopN_(rangeName));
 
   // ★採用URLを登録（レンジ横断で重複排除）
   if (picked){
@@ -923,6 +937,9 @@ function extractRangeSnippetMismatch_(ssOut, domains, range, sheetName, rangeNam
       const lastmod = (lastmodMap && (lastmodMap[normUrl] || lastmodMap[url])) || "";
       if (!hasValidLastmod_(lastmod)) return;
 
+      // ★ Snippet でも lastmod が新しすぎるページは除外
+      if (shouldExcludeByLastmod_(lastmod)) return;
+
       // タイトル/メタ/H1/entryBody（HTMLキャッシュから取得）
       const tmh = getCurrentTitleMetaH1Entry_(normUrl);
       const title = String(tmh.title || "");
@@ -1010,7 +1027,7 @@ function extractRangeSnippetMismatch_(ssOut, domains, range, sheetName, rangeNam
   });
 
   table.sort((a,b) => (b.score||0) - (a.score||0));
-  const top = table.slice(0, TOP_N);
+  const top = table.slice(0, getTopN_(rangeName));
 
   if (picked){
     top.forEach(r => picked.add(normalizeUrl_(r.url)));
@@ -1212,7 +1229,7 @@ function extractManualTargets_(ssOut, domains, rangeCur, sheetName, lastmodMap, 
   // 手動キューは入力順が大事になりがちなので、ソートしない
   // （ENABLE_SORT_BY_SCORE は適用しない）
 
-  const top = table.slice(0, TOP_N);
+  const top = table.slice(0, getTopN_("Manual"));
 
   // ★採用URLを登録（レンジ横断で重複排除）
   if (picked){
@@ -2037,6 +2054,10 @@ function isLastmodTooRecent_(lastmod, days){
   return d >= cutoff; // cutoff以降（=最近更新）なら除外
 }
 
+function shouldExcludeByLastmod_(lastmod){
+  return isLastmodTooRecent_(lastmod, EXCLUDE_RECENT_LASTMOD_DAYS);
+}
+
 function hasValidLastmod_(v){
   if (v instanceof Date && !isNaN(v)) return true;
   const s = String(v || '').trim();
@@ -2322,4 +2343,3 @@ function buildForbiddenWordsBlock_() {
     rest > 0 ? `\n…ほか ${rest} 件（省略）` : ""
   ].join("\n");
 }
-
